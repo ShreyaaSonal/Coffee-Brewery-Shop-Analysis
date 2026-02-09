@@ -1,0 +1,257 @@
+--Create Table Shops
+
+CREATE TABLE Shops (
+	shop_id INTEGER PRIMARY KEY,
+	shop_name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	state TEXT NOT NULL,
+	country TEXT NOT NULL
+);
+
+
+--Create Table Customer
+
+CREATE TABLE Customer (
+	customer_id INTEGER PRIMARY KEY,
+	customer_name TEXT NOT NULL,
+	gender TEXT,
+	loyalty_tier TEXT,
+	join_date date,
+	shop_id INTEGER,
+	FOREIGN KEY (shop_id) REFERENCES Shops(shop_id)
+);
+
+
+--Create Table Menu
+
+CREATE TABLE Menu(
+	product_id INTEGER PRIMARY KEY,
+	product_name TEXT,
+	base_price REAL,
+	shop_id INTEGER,
+	snacks TEXT,
+	FOREIGN KEY (shop_id) REFERENCES Shops(shop_id)
+);
+
+
+--Create Table Orders
+
+CREATE TABLE Orders(
+	order_id INTEGER PRIMARY KEY,
+	order_date date,
+	shop_id INTEGER,
+	customer_id INTEGER,
+	product_id INTEGER,
+	quantity REAL,
+	price REAL,
+	gross_amount REAL,
+	discount_pct REAL,
+	total_amount REAL,
+	payment_method TEXT,
+	refund_amount REAL,
+	refund_count INTEGER,
+	FOREIGN KEY (shop_id) REFERENCES Shops(shop_id),
+	FOREIGN KEY (customer_id) REFERENCES Customer(customer_id),
+	FOREIGN KEY (product_id) REFERENCES Menu(product_id)
+);
+
+
+
+--Using Pragma for the table information types
+
+PRAGMA table_info (Shops);
+PRAGMA table_info (Customer);
+PRAGMA table_info (Menu);
+PRAGMA table_info (Orders);
+
+
+--Revenue Segments and Tickets Analysis
+
+--1.Which Shops generate the most revenue overall?
+SELECT s.shop_id, s.shop_name, s.city, s.state, 
+sum(o.total_amount) as total_revenue, count(*) as order_count 
+FROM Shops s JOIN Orders o on s.shop_id = o.shop_id
+GROUP by s.shop_id, s.shop_name, s.city, s.state
+ORDER by total_revenue DESC;
+
+--2.Which Shop generate the most revenue overall?
+SELECT s.shop_id, s.shop_name, s.city, s.state, 
+sum(o.total_amount) as total_revenue, count(*) as order_count 
+FROM Shops s JOIN Orders o on s.shop_id = o.shop_id
+GROUP by s.shop_id, s.shop_name, s.city, s.state
+ORDER by total_revenue DESC
+LIMIT 1;
+
+--3.Which cities are most valuable by revenue and avg ticket size?
+SELECT s.city, s.state, sum(o.total_amount) as total_revenue, 
+count(*) as orders_count, round(avg(o.total_amount),2) as avg_ticket
+FROM Shops s JOIN Orders o on s.shop_id = o.shop_id
+GROUP by s.city, s.state
+ORDER by total_revenue DESC;
+
+--4.Which cities are most valuable avg ticket size?
+SELECT s.city, s.state, count(*) as orders_count, 
+round(avg(o.total_amount),2) as avg_ticket
+FROM Shops s JOIN Orders o on s.shop_id = o.shop_id
+GROUP by s.city, s.state
+ORDER by avg_ticket DESC;
+
+--5.What is the revenue split by snacks category per Shops?
+SELECT s.shop_name, m.snacks, 
+sum(o.total_amount) as total_revenue,
+count(*) as orders_count
+FROM Shops s JOIN Menu m on s.shop_id = m.shop_id
+JOIN Orders o on m.product_id = o.product_id
+WHERE m.snacks != 'NA'
+GROUP by s.shop_name, m.snacks
+ORDER by s.shop_name, total_revenue DESC;
+
+
+--Popular Products Analysis
+
+--6.What menu items are 'hero' products (high revenue & volume)?
+SELECT m.product_name, sum(o.total_amount) as revenue, count(*) as volume
+FROM Menu m JOIN Orders o on m.product_id = o.product_id
+GROUP by m.product_name
+HAVING volume >= 25
+ORDER by revenue DESC, volume DESC;
+
+--7.Are discount actually driving higher order values?
+SELECT CASE WHEN discount_pct = 0 THEN 'No Discount(0%)'
+			WHEN discount_pct BETWEEN 1 AND 10 THEN 'Low Discount(1-10%)'
+			ELSE 'High Discount(>10%)'
+		End as discount_stat,
+	sum(total_amount) as revenue,
+	count(*) as orders_count, round(avg(total_amount),2) as avg_order_value
+FROM Orders 
+GROUP by discount_stat
+ORDER by avg_order_value DESC;
+
+--8.Text Search: Which products that look like "hazelnut" are top sellers?
+SELECT m.product_id, m.product_name, m.snacks,
+sum(o.total_amount) as revenue, count(*) as orders_count
+FROM Menu m JOIN Orders o on m.product_id= o.product_id
+WHERE m.product_name like 'hazelnut%'
+GROUP by m.product_id, m.product_name, m.snacks
+ORDER by revenue DESC;
+
+--9.Text Search: Which products that look like "latte" are top sellers?
+SELECT m.product_id, m.product_name, m.snacks,
+sum(o.total_amount) as revenue, count(*) as orders_count
+FROM Menu m JOIN Orders o on m.product_id= o.product_id
+WHERE m.product_name like '%latte%'
+GROUP by m.product_id, m.product_name, m.snacks
+ORDER by revenue DESC;
+
+--10.Are certain snack types concentrated in specific cities?
+SELECT s.city, m.snacks, 
+count(DISTINCT m.product_id) as unique_items,
+sum(o.total_amount) as revenue
+FROM Menu m JOIN Orders o on m.product_id = o.product_id
+JOIN Shops s on o.shop_id = s.shop_id
+WHERE m.snacks != 'NA'
+GROUP by s.city, m.snacks
+ORDER by s.city, revenue DESC;
+
+
+--Shops and Customer Input Analysis
+
+--11.Which shops are most discount-dependent?
+SELECT s.shop_name, round(avg(o.discount_pct),2) as avg_discount_pct,
+sum(o.total_amount) as revenue
+FROM Shops s JOIN Orders o on s.shop_id = o.shop_id
+GROUP by s.shop_name
+ORDER by avg_discount_pct DESC;
+
+--12.Who are the top 10 Customer by lifetime value and which shop do they visit often?
+SELECT c.customer_id, c.customer_name, c.loyalty_tier, s.shop_name,
+sum(o.total_amount) as total_spent, count(*) as orders_count 
+FROM Customer c JOIN Orders o on c.customer_id = o.customer_id
+JOIN Shops s on c.shop_id = s.shop_id
+GROUP by c.customer_id, c.customer_name, c.loyalty_tier, s.shop_name
+ORDER by total_spent DESC
+LIMIT 10;
+
+--13.How many customers fall into value segments (High/medium/low spend)?
+WITH customers_value_segment as
+(SELECT c.customer_id, c.customer_name, sum(o.total_amount) as total_spend
+FROM Customer c JOIN Orders o on c.customer_id = o.customer_id
+GROUP by c.customer_id, c.customer_name)
+SELECT CASE WHEN total_spend >= 1500 THEN "High"
+			WHEN total_spend >= 500 THEN "Medium"
+			ELSE "Low" 
+		END as value_segment,
+	count(*) as customers_count
+FROM customers_value_segment
+GROUP by value_segment
+ORDER by customers_count DESC;
+
+--14.Which shops under perform vs network avg revenue?
+WITH shop_revenue as
+(SELECT shop_id, sum(total_amount) as revenue
+FROM Orders GROUP by shop_id),
+network as (
+SELECT avg(revenue) as avg_revenue
+FROM shop_revenue)
+SELECT s.shop_id, s.shop_name, s.city, s.state, sr.revenue,
+round(100.0 * sr.revenue/ n.avg_revenue, 1) as revenue_vs_network_pct
+FROM shop_revenue sr JOIN Shops s on sr.shop_id = s.shop_id
+CROSS JOIN network n
+WHERE sr.revenue < n.avg_revenue
+ORDER by sr.revenue ASC;
+
+
+--Loyalty Tier Analysis
+
+--15.Which loyalty_tier are truly valuable?
+SELECT c.loyalty_tier, count(DISTINCT c.customer_id) as customers_count,
+sum(o.total_amount) as total_revenue, round(avg(o.total_amount),2) as avg_order_value
+FROM Customer c JOIN Orders o on c.customer_id = o.customer_id
+GROUP by c.loyalty_tier
+ORDER by total_revenue DESC;
+
+--16.Which customer segments are most valuable by loyalty tier and payment preference?
+SELECT c.loyalty_tier, o.payment_method,
+count(DISTINCT c.customer_id) as unique_customers,
+count(*) as orders_count, sum(o.total_amount) as revenue,
+round(avg(o.total_amount),2) as avg_order,
+round(sum(o.total_amount)/ nullif (count(DISTINCT c.customer_id),0),2) as revenue_per_customer
+FROM Customer c JOIN Orders o on c.customer_id = o.customer_id
+GROUP by c.loyalty_tier, o.payment_method
+ORDER by revenue DESC, revenue_per_customer DESC;
+
+
+--Payment and Refund Performance
+
+--17.What is the adoption and performance of each payment method?
+SELECT payment_method, count(*) as orders_count,
+sum(total_amount) as revenue, round(avg(total_amount),2) as avg_ticket
+FROM Orders
+GROUP by payment_method 
+ORDER by revenue DESC;
+
+--18.Are there shops or cities which unusually high refund rates?
+SELECT s.shop_name, s.city, s.state,
+sum(o.total_amount) as revenue, sum(o.refund_amount) as refund,
+round(100.0 * sum(o.refund_amount)/ nullif(sum(o.total_amount),0),2) as refund_rate_pct
+FROM Shops s JOIN Orders o on s.shop_id = o.shop_id
+GROUP by s.shop_name, s.city, s.state
+HAVING revenue > 0
+ORDER by refund_rate_pct DESC;
+
+--19.Which products are driving most refunds?
+SELECT m.product_id, m.product_name, m.snacks,
+sum(o.refund_amount) as refunds, count(*) as refund_orders
+FROM Menu m JOIN Orders o on m.product_id = o.product_id
+WHERE o.refund_amount > 0
+GROUP by m.product_id, m.product_name, m.snacks
+ORDER by refunds DESC;
+
+--20.Which products show pricing inconsistency vs base price?
+SELECT m.product_id, m.product_name, m.base_price,
+round(avg(o.price),2) as avg_price,
+round(avg(o.price - m.base_price),2) as below_avg_price
+FROM Menu m JOIN Orders o on m.product_id = o.product_id
+GROUP by m.product_id, m.product_name, m.base_price
+HAVING ABS(below_avg_price) > 5
+ORDER by below_avg_price DESC;
